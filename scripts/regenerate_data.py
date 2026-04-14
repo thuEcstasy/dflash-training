@@ -31,8 +31,14 @@ Usage:
 """
 
 import os
-_HF_ENDPOINT = os.environ.get("HF_ENDPOINT", "https://hf-mirror.com")
-os.environ["HF_ENDPOINT"] = _HF_ENDPOINT
+_HF_MIRROR = os.environ.get("HF_ENDPOINT", "https://hf-mirror.com")
+os.environ["HF_ENDPOINT"] = _HF_MIRROR
+
+import huggingface_hub
+import huggingface_hub.constants as _hf_constants
+_hf_constants.ENDPOINT = _HF_MIRROR
+huggingface_hub.ENDPOINT = _HF_MIRROR          # type: ignore[attr-defined]
+print(f"[mirror] HF_ENDPOINT → {_HF_MIRROR}")
 
 import argparse
 import asyncio

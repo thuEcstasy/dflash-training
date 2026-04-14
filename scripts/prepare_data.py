@@ -1,10 +1,19 @@
-# ── MUST be set before ANY huggingface_hub / datasets import ─────────────────
-# datasets reads HF_ENDPOINT exactly once at import time; setting it afterwards
-# has no effect.  We write to os.environ here so the value is guaranteed to be
-# visible regardless of whether the caller exported it in the shell.
+# ── Mirror patch (must run before datasets/huggingface_hub are imported) ──────
+# huggingface_hub caches ENDPOINT as a module-level constant at import time.
+# Setting os.environ alone is not enough if the constant was already cached.
+# We therefore:
+#   1. Set os.environ so the env var is visible to any fresh import.
+#   2. After importing huggingface_hub, overwrite its cached constant directly.
 import os
-_HF_ENDPOINT = os.environ.get("HF_ENDPOINT", "https://hf-mirror.com")
-os.environ["HF_ENDPOINT"] = _HF_ENDPOINT
+_HF_MIRROR = os.environ.get("HF_ENDPOINT", "https://hf-mirror.com")
+os.environ["HF_ENDPOINT"] = _HF_MIRROR
+
+import huggingface_hub
+import huggingface_hub.constants as _hf_constants
+_hf_constants.ENDPOINT = _HF_MIRROR
+# Also patch the top-level attribute used by some versions
+huggingface_hub.ENDPOINT = _HF_MIRROR          # type: ignore[attr-defined]
+print(f"[mirror] HF_ENDPOINT → {_HF_MIRROR}")
 # ─────────────────────────────────────────────────────────────────────────────
 
 """
