@@ -16,7 +16,7 @@ loss_decay_gamma:          7.0     # exponential loss decay  (SpecForge default)
 
 # ── Data ──────────────────────────────────────────────
 # After running scripts/regenerate_data.py
-train_data_path: "./cache/dataset/perfectblend_qwen3-8b_regen.jsonl"
+train_data_path: "./cache/dataset/dflash_paper_regen.jsonl"
 max_seq_len:     4096
 num_workers:     4
 
