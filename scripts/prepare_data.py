@@ -79,16 +79,29 @@ from datasets import load_dataset
 
 DATASETS = {
     "nemotron": {
-        # v2 is gated
+        # v2 is gated — full train split
         "hf_path":   "nvidia/Nemotron-Post-Training-Dataset-v2",
         "hf_split":  "train",
         "converter": "nemotron",
     },
-    "nemotron_code": {
-        # code subset of Nemotron V2 (gated)
+    "nemotron_stem": {
         "hf_path":   "nvidia/Nemotron-Post-Training-Dataset-v2",
-        "hf_config": "code",
-        "hf_split":  "train",
+        "hf_split":  "stem",
+        "converter": "nemotron",
+    },
+    "nemotron_chat": {
+        "hf_path":   "nvidia/Nemotron-Post-Training-Dataset-v2",
+        "hf_split":  "chat",
+        "converter": "nemotron",
+    },
+    "nemotron_math": {
+        "hf_path":   "nvidia/Nemotron-Post-Training-Dataset-v2",
+        "hf_split":  "math",
+        "converter": "nemotron",
+    },
+    "nemotron_code": {
+        "hf_path":   "nvidia/Nemotron-Post-Training-Dataset-v2",
+        "hf_split":  "code",
         "converter": "nemotron",
     },
     "codealpaca": {
@@ -109,16 +122,15 @@ DATASETS = {
 }
 
 # Paper mix: (dataset_name, max_samples)
-# The paper only states "~800K total from Nemotron V2 + CodeAlpaca",
-# without specifying the exact split.
-# CodeAlpaca is ~20K in total, so we take all of it;
-# the remainder (~780K) is sampled from Nemotron V2.
-# Adjust NEMOTRON_CAP if you want a different total size.
+# ~800K total: stem + chat + math + code from Nemotron V2 (~780K, 195K each)
+#              + CodeAlpaca (~20K, all)
 NEMOTRON_CAP = 780_000
-PAPER_MIX = [
-    ("nemotron",   NEMOTRON_CAP),
-    ("codealpaca", -1),          # -1 = all (~20K)
-]
+NEMOTRON_SPLITS = ["nemotron_stem", "nemotron_chat", "nemotron_math", "nemotron_code"]
+_per_split = NEMOTRON_CAP // len(NEMOTRON_SPLITS)  # 195_000 each
+PAPER_MIX = (
+    [(s, _per_split) for s in NEMOTRON_SPLITS]
+    + [("codealpaca", -1)]        # -1 = all (~20K)
+)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Format converters → unified {"messages": [...]} format
