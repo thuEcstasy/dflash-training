@@ -223,20 +223,36 @@ def _hf_token() -> Optional[str]:
     return None
 
 
-def _wget_download(url: str, dest: str, token: Optional[str] = None) -> bool:
-    """Download url → dest using wget (no SSL verify). Returns True on success."""
+def _wget_download(url: str, dest: str, token: Optional[str] = None,
+                   max_retries: int = 5) -> bool:
+    """Download url → dest using wget with resume + retry. Returns True on success."""
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     if os.path.exists(dest):
         return True
-    cmd = ["wget", "-q", "--no-check-certificate", "-O", dest]
-    if token:
-        cmd += ["--header", f"Authorization: Bearer {token}"]
-    cmd.append(url)
-    ret = subprocess.run(cmd, capture_output=True)
-    if ret.returncode != 0:
-        print(f"  [wget] failed: {url}\n  {ret.stderr.decode()[:200]}")
-        return False
-    return True
+    tmp = dest + ".part"
+    for attempt in range(1, max_retries + 1):
+        cmd = [
+            "wget",
+            "--no-check-certificate",
+            "--tries=3",           # wget-level retries per attempt
+            "--timeout=60",        # 60s connect/read timeout
+            "--waitretry=10",      # wait 10s between wget retries
+            "-c",                  # resume partial download
+            "-O", tmp,
+        ]
+        if token:
+            cmd += ["--header", f"Authorization: Bearer {token}"]
+        cmd.append(url)
+        ret = subprocess.run(cmd, capture_output=True)
+        if ret.returncode == 0:
+            os.rename(tmp, dest)
+            return True
+        print(f"  [wget] attempt {attempt}/{max_retries} failed: "
+              f"{ret.stderr.decode()[:200]}")
+    # clean up incomplete file
+    if os.path.exists(tmp):
+        os.remove(tmp)
+    return False
 
 
 def _list_repo_files(hf_path: str, split: str = "train",
