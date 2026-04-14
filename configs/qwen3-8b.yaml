@@ -1,0 +1,46 @@
+# DFlash config for Qwen3-8B  (target model)
+# Reproduces the z-lab/Qwen3-8B-DFlash-b16 draft model
+# ─────────────────────────────────────────────────────
+
+# ── Target model ──────────────────────────────────────
+target_model_name_or_path: "Qwen/Qwen3-8B"
+
+# ── Draft architecture ────────────────────────────────
+num_draft_layers:          3       # 3 transformer layers
+block_size:                16      # 1 anchor + 15 predicted tokens
+num_target_sample_layers:  8       # sample 8 out of 32 target layers
+
+# ── Block diffusion ───────────────────────────────────
+blocks_per_sequence:       4       # 4 masked blocks per training step
+loss_decay_gamma:          7.0     # exponential loss decay  (SpecForge default)
+
+# ── Data ──────────────────────────────────────────────
+# After running scripts/regenerate_data.py
+train_data_path: "./cache/dataset/perfectblend_qwen3-8b_regen.jsonl"
+max_seq_len:     4096
+num_workers:     4
+
+# ── Training ──────────────────────────────────────────
+learning_rate:                  6e-4
+min_lr:                         6e-5
+weight_decay:                   0.1
+adam_beta1:                     0.9
+adam_beta2:                     0.95
+warmup_ratio:                   0.04
+num_epochs:                     6
+per_device_train_batch_size:    2
+gradient_accumulation_steps:    4
+max_grad_norm:                  1.0
+
+# ── Paths ─────────────────────────────────────────────
+output_dir:    "./checkpoints/qwen3-8b-dflash-b16"
+save_steps:    500
+eval_steps:    500
+logging_steps: 50
+
+# ── Precision ─────────────────────────────────────────
+mixed_precision: "bf16"
+
+# ── Misc ──────────────────────────────────────────────
+seed: 42
+use_flex_attention: true

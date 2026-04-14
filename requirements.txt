@@ -1,0 +1,9 @@
+torch>=2.4.0
+transformers>=4.45.0
+accelerate>=0.30.0
+datasets>=2.20.0
+pyyaml>=6.0
+aiohttp>=3.9.0
+tensorboard>=2.17.0
+# For data regeneration (optional but recommended):
+# sglang[all]
