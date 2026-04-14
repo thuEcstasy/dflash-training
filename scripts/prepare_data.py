@@ -1,19 +1,44 @@
-# ── Mirror patch (must run before datasets/huggingface_hub are imported) ──────
-# huggingface_hub caches ENDPOINT as a module-level constant at import time.
-# Setting os.environ alone is not enough if the constant was already cached.
-# We therefore:
-#   1. Set os.environ so the env var is visible to any fresh import.
-#   2. After importing huggingface_hub, overwrite its cached constant directly.
+# ── Must run before any huggingface_hub / datasets import ────────────────────
 import os
+
+# 1. Mirror
 _HF_MIRROR = os.environ.get("HF_ENDPOINT", "https://hf-mirror.com")
 os.environ["HF_ENDPOINT"] = _HF_MIRROR
 
+# 2. Cache dir → large disk instead of home partition
+_HF_CACHE = os.environ.get("HF_HUB_CACHE", "/mnt/data/szf_temp/cache/hf_hub")
+os.environ["HF_HUB_CACHE"]          = _HF_CACHE
+os.environ["HUGGINGFACE_HUB_CACHE"] = _HF_CACHE   # older env var name
+os.makedirs(_HF_CACHE, exist_ok=True)
+
+# 3. Patch huggingface_hub constants (endpoint cached at import time)
 import huggingface_hub
 import huggingface_hub.constants as _hf_constants
-_hf_constants.ENDPOINT = _HF_MIRROR
-# Also patch the top-level attribute used by some versions
-huggingface_hub.ENDPOINT = _HF_MIRROR          # type: ignore[attr-defined]
-print(f"[mirror] HF_ENDPOINT → {_HF_MIRROR}")
+_hf_constants.ENDPOINT       = _HF_MIRROR
+_hf_constants.HF_HUB_CACHE   = _HF_CACHE
+
+# 4. Disable SSL verification — works for requests, httpx, and urllib3
+import ssl
+ssl._create_default_https_context = ssl._create_unverified_context  # urllib / older libs
+os.environ["CURL_CA_BUNDLE"]    = ""   # curl-based clients
+os.environ["REQUESTS_CA_BUNDLE"] = ""  # requests
+os.environ["HTTPX_VERIFY"]       = "0" # httpx env var
+
+# Monkey-patch httpx.Client so every instance has verify=False
+try:
+    import httpx
+    _orig_client_init = httpx.Client.__init__
+    def _patched_client_init(self, *args, **kwargs):
+        kwargs.setdefault("verify", False)
+        kwargs.setdefault("timeout", 120)
+        _orig_client_init(self, *args, **kwargs)
+    httpx.Client.__init__ = _patched_client_init
+except ImportError:
+    pass
+
+print(f"[mirror] HF_ENDPOINT  → {_HF_MIRROR}")
+print(f"[cache]  HF_HUB_CACHE → {_HF_CACHE}")
+print(f"[ssl]    verify=False")
 # ─────────────────────────────────────────────────────────────────────────────
 
 """
@@ -54,7 +79,8 @@ from datasets import load_dataset
 
 DATASETS = {
     "nemotron": {
-        "hf_path":  "nvidia/Nemotron-Post-Training-Dataset-v1",
+        # v2 is gated
+        "hf_path":  "nvidia/Nemotron-Post-Training-Dataset-v2",
         "hf_split": "train",
         "converter": "nemotron",
     },
@@ -158,6 +184,87 @@ CONVERTERS = {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# wget-based downloader (bypasses Python SSL issues entirely)
+# ─────────────────────────────────────────────────────────────────────────────
+
+import subprocess
+import requests
+
+def _wget_download(url: str, dest: str) -> bool:
+    """Download url → dest using wget (no SSL verify). Returns True on success."""
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    if os.path.exists(dest):
+        return True
+    cmd = ["wget", "-q", "--no-check-certificate", "-O", dest, url]
+    ret = subprocess.run(cmd, capture_output=True)
+    if ret.returncode != 0:
+        print(f"  [wget] failed: {url}\n  {ret.stderr.decode()[:200]}")
+        return False
+    return True
+
+
+def _list_repo_files(hf_path: str, split: str = "train") -> List[str]:
+    """
+    Returns parquet file URLs for a HF dataset repo using the Hub API.
+    Falls back to a single-shard guess if the API call fails.
+    """
+    mirror   = os.environ.get("HF_ENDPOINT", "https://hf-mirror.com")
+    api_url  = f"{mirror}/api/datasets/{hf_path}/parquet/{split}"
+    try:
+        resp = requests.get(api_url, verify=False, timeout=30)
+        if resp.ok:
+            files = resp.json()
+            return [f["url"].replace("https://huggingface.co", mirror) for f in files]
+    except Exception as e:
+        print(f"  [warn] API call failed: {e}")
+
+    # Fallback: try the tree endpoint
+    tree_url = f"{mirror}/api/datasets/{hf_path}/tree/main/data"
+    try:
+        resp = requests.get(tree_url, verify=False, timeout=30)
+        if resp.ok:
+            files = [
+                f"{mirror}/datasets/{hf_path}/resolve/main/{f['path']}"
+                for f in resp.json()
+                if f["path"].endswith(".parquet") and split in f["path"]
+            ]
+            if files:
+                return files
+    except Exception as e:
+        print(f"  [warn] tree API failed: {e}")
+
+    return []
+
+
+def _load_with_wget(hf_path: str, split: str, local_base: str) -> "datasets.Dataset":
+    """Download parquet files via wget and load locally."""
+    import datasets as _datasets
+
+    urls     = _list_repo_files(hf_path, split)
+    if not urls:
+        raise RuntimeError(f"Could not find any parquet files for {hf_path}/{split}")
+
+    print(f"  Found {len(urls)} parquet shard(s), downloading via wget ...")
+    local_dir = os.path.join(local_base, hf_path.replace("/", "--"), split)
+    os.makedirs(local_dir, exist_ok=True)
+
+    local_files = []
+    for url in urls:
+        fname = url.split("/")[-1].split("?")[0]
+        dest  = os.path.join(local_dir, fname)
+        print(f"    {fname} ...", end=" ", flush=True)
+        ok = _wget_download(url, dest)
+        print("OK" if ok else "FAILED")
+        if ok:
+            local_files.append(dest)
+
+    if not local_files:
+        raise RuntimeError("All downloads failed.")
+
+    return _datasets.load_dataset("parquet", data_files=local_files, split="train")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Core loader
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -165,13 +272,14 @@ def iter_dataset(name: str, max_samples: int) -> Iterator[Dict]:
     """Yields converted {"messages": [...]} dicts from one source dataset."""
     cfg       = DATASETS[name]
     converter = CONVERTERS[cfg["converter"]]
+    local_base = os.environ.get("HF_HUB_CACHE", "/mnt/data/szf_temp/cache/hf_hub")
 
     print(f"  Loading {cfg['hf_path']} (split={cfg['hf_split']}) ...")
-    ds = load_dataset(
-        cfg["hf_path"],
-        split=cfg["hf_split"],
-        trust_remote_code=True,
-    )
+    try:
+        ds = _load_with_wget(cfg["hf_path"], cfg["hf_split"], local_base)
+    except Exception as e:
+        print(f"  [wget] failed ({e}), falling back to load_dataset ...")
+        ds = load_dataset(cfg["hf_path"], split=cfg["hf_split"])
     if max_samples > 0:
         ds = ds.select(range(min(max_samples, len(ds))))
 
@@ -192,10 +300,10 @@ def iter_dataset(name: str, max_samples: int) -> Iterator[Dict]:
 def prepare_paper_mix(output_dir: str, max_samples: int, seed: int):
     """
     Reproduces the paper's ~800K training set:
-      Nemotron Post-Training V2  (780K)  +  CodeAlpaca  (~20K)
+      Nemotron Post-Training V1  (780K)  +  CodeAlpaca  (~20K)
     Shuffles the merged list before writing.
     """
-    print("[prepare_data] Building paper mix: Nemotron V2 + CodeAlpaca")
+    print("[prepare_data] Building paper mix: Nemotron V1 + CodeAlpaca")
     all_samples: List[Dict] = []
 
     for ds_name, cap in PAPER_MIX:

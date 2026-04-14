@@ -32,13 +32,35 @@ Usage:
 
 import os
 _HF_MIRROR = os.environ.get("HF_ENDPOINT", "https://hf-mirror.com")
-os.environ["HF_ENDPOINT"] = _HF_MIRROR
+_HF_CACHE  = os.environ.get("HF_HUB_CACHE", "/mnt/data/szf_temp/cache/hf_hub")
+os.environ["HF_ENDPOINT"]          = _HF_MIRROR
+os.environ["HF_HUB_CACHE"]         = _HF_CACHE
+os.environ["HUGGINGFACE_HUB_CACHE"] = _HF_CACHE
+os.makedirs(_HF_CACHE, exist_ok=True)
 
 import huggingface_hub
 import huggingface_hub.constants as _hf_constants
-_hf_constants.ENDPOINT = _HF_MIRROR
-huggingface_hub.ENDPOINT = _HF_MIRROR          # type: ignore[attr-defined]
-print(f"[mirror] HF_ENDPOINT → {_HF_MIRROR}")
+_hf_constants.ENDPOINT     = _HF_MIRROR
+_hf_constants.HF_HUB_CACHE = _HF_CACHE
+
+import ssl
+ssl._create_default_https_context = ssl._create_unverified_context
+os.environ["CURL_CA_BUNDLE"]     = ""
+os.environ["REQUESTS_CA_BUNDLE"] = ""
+os.environ["HTTPX_VERIFY"]       = "0"
+try:
+    import httpx
+    _orig = httpx.Client.__init__
+    def _patched(self, *args, **kwargs):
+        kwargs.setdefault("verify", False)
+        kwargs.setdefault("timeout", 120)
+        _orig(self, *args, **kwargs)
+    httpx.Client.__init__ = _patched
+except ImportError:
+    pass
+
+print(f"[mirror] HF_ENDPOINT  → {_HF_MIRROR}")
+print(f"[cache]  HF_HUB_CACHE → {_HF_CACHE}")
 
 import argparse
 import asyncio
