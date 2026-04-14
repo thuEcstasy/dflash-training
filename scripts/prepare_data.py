@@ -80,8 +80,15 @@ from datasets import load_dataset
 DATASETS = {
     "nemotron": {
         # v2 is gated
-        "hf_path":  "nvidia/Nemotron-Post-Training-Dataset-v2",
-        "hf_split": "train",
+        "hf_path":   "nvidia/Nemotron-Post-Training-Dataset-v2",
+        "hf_split":  "train",
+        "converter": "nemotron",
+    },
+    "nemotron_code": {
+        # code subset of Nemotron V2 (gated)
+        "hf_path":   "nvidia/Nemotron-Post-Training-Dataset-v2",
+        "hf_config": "code",
+        "hf_split":  "train",
         "converter": "nemotron",
     },
     "codealpaca": {
@@ -203,15 +210,51 @@ def _wget_download(url: str, dest: str) -> bool:
     return True
 
 
-def _list_repo_files(hf_path: str, split: str = "train") -> List[str]:
+def _hf_token() -> Optional[str]:
+    """Read HuggingFace token from env or cached login."""
+    token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+    if token:
+        return token
+    token_file = os.path.expanduser("~/.cache/huggingface/token")
+    if os.path.exists(token_file):
+        with open(token_file) as f:
+            t = f.read().strip()
+            if t:
+                return t
+    return None
+
+
+def _wget_download(url: str, dest: str, token: Optional[str] = None) -> bool:
+    """Download url → dest using wget (no SSL verify). Returns True on success."""
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    if os.path.exists(dest):
+        return True
+    cmd = ["wget", "-q", "--no-check-certificate", "-O", dest]
+    if token:
+        cmd += ["--header", f"Authorization: Bearer {token}"]
+    cmd.append(url)
+    ret = subprocess.run(cmd, capture_output=True)
+    if ret.returncode != 0:
+        print(f"  [wget] failed: {url}\n  {ret.stderr.decode()[:200]}")
+        return False
+    return True
+
+
+def _list_repo_files(hf_path: str, split: str = "train",
+                     config: Optional[str] = None) -> List[str]:
     """
     Returns parquet file URLs for a HF dataset repo using the Hub API.
     Falls back to a single-shard guess if the API call fails.
     """
-    mirror   = os.environ.get("HF_ENDPOINT", "https://hf-mirror.com")
-    api_url  = f"{mirror}/api/datasets/{hf_path}/parquet/{split}"
+    mirror  = os.environ.get("HF_ENDPOINT", "https://hf-mirror.com")
+    token   = _hf_token()
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+
+    # With config: /parquet/{config}/{split}  Without: /parquet/{split}
+    parquet_path = f"{config}/{split}" if config else split
+    api_url = f"{mirror}/api/datasets/{hf_path}/parquet/{parquet_path}"
     try:
-        resp = requests.get(api_url, verify=False, timeout=30)
+        resp = requests.get(api_url, headers=headers, verify=False, timeout=30)
         if resp.ok:
             files = resp.json()
             return [f["url"].replace("https://huggingface.co", mirror) for f in files]
@@ -221,12 +264,15 @@ def _list_repo_files(hf_path: str, split: str = "train") -> List[str]:
     # Fallback: try the tree endpoint
     tree_url = f"{mirror}/api/datasets/{hf_path}/tree/main/data"
     try:
-        resp = requests.get(tree_url, verify=False, timeout=30)
+        resp = requests.get(tree_url, headers=headers, verify=False, timeout=30)
         if resp.ok:
+            prefix = f"{config}/" if config else ""
             files = [
                 f"{mirror}/datasets/{hf_path}/resolve/main/{f['path']}"
                 for f in resp.json()
-                if f["path"].endswith(".parquet") and split in f["path"]
+                if f["path"].endswith(".parquet")
+                and split in f["path"]
+                and (not config or f["path"].startswith(f"data/{prefix}"))
             ]
             if files:
                 return files
@@ -236,16 +282,19 @@ def _list_repo_files(hf_path: str, split: str = "train") -> List[str]:
     return []
 
 
-def _load_with_wget(hf_path: str, split: str, local_base: str) -> "datasets.Dataset":
+def _load_with_wget(hf_path: str, split: str, local_base: str,
+                    config: Optional[str] = None) -> "datasets.Dataset":
     """Download parquet files via wget and load locally."""
     import datasets as _datasets
 
-    urls     = _list_repo_files(hf_path, split)
+    token = _hf_token()
+    urls  = _list_repo_files(hf_path, split, config=config)
     if not urls:
         raise RuntimeError(f"Could not find any parquet files for {hf_path}/{split}")
 
     print(f"  Found {len(urls)} parquet shard(s), downloading via wget ...")
-    local_dir = os.path.join(local_base, hf_path.replace("/", "--"), split)
+    tag = f"{config}-{split}" if config else split
+    local_dir = os.path.join(local_base, hf_path.replace("/", "--"), tag)
     os.makedirs(local_dir, exist_ok=True)
 
     local_files = []
@@ -253,7 +302,7 @@ def _load_with_wget(hf_path: str, split: str, local_base: str) -> "datasets.Data
         fname = url.split("/")[-1].split("?")[0]
         dest  = os.path.join(local_dir, fname)
         print(f"    {fname} ...", end=" ", flush=True)
-        ok = _wget_download(url, dest)
+        ok = _wget_download(url, dest, token=token)
         print("OK" if ok else "FAILED")
         if ok:
             local_files.append(dest)
