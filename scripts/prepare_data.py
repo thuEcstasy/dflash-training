@@ -78,20 +78,9 @@ from datasets import load_dataset
 # ─────────────────────────────────────────────────────────────────────────────
 
 DATASETS = {
-    "nemotron": {
-        # v2 is gated — full train split
-        "hf_path":   "nvidia/Nemotron-Post-Training-Dataset-v2",
-        "hf_split":  "train",
-        "converter": "nemotron",
-    },
     "nemotron_stem": {
         "hf_path":   "nvidia/Nemotron-Post-Training-Dataset-v2",
         "hf_split":  "stem",
-        "converter": "nemotron",
-    },
-    "nemotron_chat": {
-        "hf_path":   "nvidia/Nemotron-Post-Training-Dataset-v2",
-        "hf_split":  "chat",
         "converter": "nemotron",
     },
     "nemotron_math": {
@@ -109,24 +98,13 @@ DATASETS = {
         "hf_split": "train",
         "converter": "alpaca",
     },
-    "sharegpt": {
-        "hf_path":  "anon8231489123/ShareGPT_Vicuna_unfiltered",
-        "hf_split": "train",
-        "converter": "sharegpt",
-    },
-    "perfectblend": {
-        "hf_path":  "eigen-ai-labs/perfectblend-qwen3-8b-regen-demo",
-        "hf_split": "train",
-        "converter": "messages",
-    },
 }
 
-# Paper mix: (dataset_name, max_samples)
-# ~800K total: stem + chat + math + code from Nemotron V2 (~780K, 195K each)
-#              + CodeAlpaca (~20K, all)
+# Mix: stem + math + code from Nemotron V2 (~780K, 260K each cap)
+#      + CodeAlpaca (~20K, all)  →  ~800K total
 NEMOTRON_CAP = 780_000
 NEMOTRON_SPLITS = ["nemotron_stem", "nemotron_math", "nemotron_code"]
-_per_split = NEMOTRON_CAP // len(NEMOTRON_SPLITS)  # 195_000 each
+_per_split = NEMOTRON_CAP // len(NEMOTRON_SPLITS)  # 260_000 each
 PAPER_MIX = (
     [(s, _per_split) for s in NEMOTRON_SPLITS]
     + [("codealpaca", -1)]        # -1 = all (~20K)
@@ -176,30 +154,9 @@ def convert_alpaca(item: Dict) -> Optional[Dict]:
     }
 
 
-def convert_sharegpt(item: Dict) -> Optional[Dict]:
-    messages = []
-    for turn in item.get("conversations", []):
-        role = "user" if turn.get("from") in ("human", "user") else "assistant"
-        content = turn.get("value", "").strip()
-        if content:
-            messages.append({"role": role, "content": content})
-    if not messages:
-        return None
-    return {"messages": messages}
-
-
-def convert_messages(item: Dict) -> Optional[Dict]:
-    msgs = item.get("messages")
-    if not msgs:
-        return None
-    return {"messages": msgs}
-
-
 CONVERTERS = {
     "nemotron":  convert_nemotron,
     "alpaca":    convert_alpaca,
-    "sharegpt":  convert_sharegpt,
-    "messages":  convert_messages,
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
