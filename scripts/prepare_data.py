@@ -197,19 +197,6 @@ CONVERTERS = {
 import subprocess
 import requests
 
-def _wget_download(url: str, dest: str) -> bool:
-    """Download url → dest using wget (no SSL verify). Returns True on success."""
-    os.makedirs(os.path.dirname(dest), exist_ok=True)
-    if os.path.exists(dest):
-        return True
-    cmd = ["wget", "-q", "--no-check-certificate", "-O", dest, url]
-    ret = subprocess.run(cmd, capture_output=True)
-    if ret.returncode != 0:
-        print(f"  [wget] failed: {url}\n  {ret.stderr.decode()[:200]}")
-        return False
-    return True
-
-
 def _hf_token() -> Optional[str]:
     """Read HuggingFace token from env or cached login."""
     token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
@@ -319,16 +306,22 @@ def _load_with_wget(hf_path: str, split: str, local_base: str,
 
 def iter_dataset(name: str, max_samples: int) -> Iterator[Dict]:
     """Yields converted {"messages": [...]} dicts from one source dataset."""
-    cfg       = DATASETS[name]
-    converter = CONVERTERS[cfg["converter"]]
+    cfg        = DATASETS[name]
+    converter  = CONVERTERS[cfg["converter"]]
     local_base = os.environ.get("HF_HUB_CACHE", "/mnt/data/szf_temp/cache/hf_hub")
+    config     = cfg.get("hf_config")
 
-    print(f"  Loading {cfg['hf_path']} (split={cfg['hf_split']}) ...")
+    label = f"{cfg['hf_path']}" + (f"/{config}" if config else "") + f" (split={cfg['hf_split']})"
+    print(f"  Loading {label} ...")
     try:
-        ds = _load_with_wget(cfg["hf_path"], cfg["hf_split"], local_base)
+        ds = _load_with_wget(cfg["hf_path"], cfg["hf_split"], local_base, config=config)
     except Exception as e:
         print(f"  [wget] failed ({e}), falling back to load_dataset ...")
-        ds = load_dataset(cfg["hf_path"], split=cfg["hf_split"])
+        load_kwargs = {"split": cfg["hf_split"]}
+        if config:
+            ds = load_dataset(cfg["hf_path"], config, **load_kwargs)
+        else:
+            ds = load_dataset(cfg["hf_path"], **load_kwargs)
     if max_samples > 0:
         ds = ds.select(range(min(max_samples, len(ds))))
 
