@@ -1,12 +1,21 @@
+# ── MUST be set before ANY huggingface_hub / datasets import ─────────────────
+# datasets reads HF_ENDPOINT exactly once at import time; setting it afterwards
+# has no effect.  We write to os.environ here so the value is guaranteed to be
+# visible regardless of whether the caller exported it in the shell.
+import os
+_HF_ENDPOINT = os.environ.get("HF_ENDPOINT", "https://hf-mirror.com")
+os.environ["HF_ENDPOINT"] = _HF_ENDPOINT
+# ─────────────────────────────────────────────────────────────────────────────
+
 """
 Step 1: Download and prepare seed dataset.
 
 Paper setting (DFlash §4):
-  ~800K samples = Nemotron Post-Training Dataset V2  (~780K)
+  ~800K samples = Nemotron Post-Training Dataset V1  (~780K)
                 + CodeAlpaca                          (~20K)
 
 Modes:
-  --paper          Mix Nemotron V2 + CodeAlpaca to match paper (~800K total)
+  --paper          Mix Nemotron V1 + CodeAlpaca to match paper (~800K total)
   --dataset NAME   Single dataset (nemotron / codealpaca / sharegpt / perfectblend)
 
 Output: ./cache/dataset/dflash_paper_train.jsonl  (messages format, shuffled)
@@ -20,21 +29,15 @@ Usage:
 
     # Quick smoke-test (1000 samples):
     python scripts/prepare_data.py --paper --max-samples 1000
-
-Note: set HF_ENDPOINT=https://hf-mirror.com before running if on a CN server.
 """
 
 import argparse
 import json
-import os
 import random
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional
 
 from datasets import load_dataset
-
-# ── Mirror: honour HF_ENDPOINT if set (e.g. https://hf-mirror.com) ──────────
-HF_ENDPOINT = os.environ.get("HF_ENDPOINT", "https://huggingface.co")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Dataset registry
@@ -42,7 +45,7 @@ HF_ENDPOINT = os.environ.get("HF_ENDPOINT", "https://huggingface.co")
 
 DATASETS = {
     "nemotron": {
-        "hf_path":  "nvidia/Nemotron-Post-Training-Dataset-v2",
+        "hf_path":  "nvidia/Nemotron-Post-Training-Dataset-v1",
         "hf_split": "train",
         "converter": "nemotron",
     },

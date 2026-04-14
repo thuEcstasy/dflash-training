@@ -30,6 +30,10 @@ Usage:
         --is-reasoning-model   # for Qwen3 thinking mode
 """
 
+import os
+_HF_ENDPOINT = os.environ.get("HF_ENDPOINT", "https://hf-mirror.com")
+os.environ["HF_ENDPOINT"] = _HF_ENDPOINT
+
 import argparse
 import asyncio
 import json
