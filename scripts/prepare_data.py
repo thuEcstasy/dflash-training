@@ -125,7 +125,7 @@ DATASETS = {
 # ~800K total: stem + chat + math + code from Nemotron V2 (~780K, 195K each)
 #              + CodeAlpaca (~20K, all)
 NEMOTRON_CAP = 780_000
-NEMOTRON_SPLITS = ["nemotron_stem", "nemotron_chat", "nemotron_math", "nemotron_code"]
+NEMOTRON_SPLITS = ["nemotron_stem", "nemotron_math", "nemotron_code"]
 _per_split = NEMOTRON_CAP // len(NEMOTRON_SPLITS)  # 195_000 each
 PAPER_MIX = (
     [(s, _per_split) for s in NEMOTRON_SPLITS]
